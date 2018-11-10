@@ -1,8 +1,10 @@
-// Version May 04 2009
+// Version May 04 2009, Revised by Jingtao Chen @Nov.11/2018, r.a.0.1
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <unistd.h>
+#include <stdbool.h>
 struct Atom
 {
 	char name[40];
@@ -31,8 +33,11 @@ int compar(const float* d1, const float* d2);
 long search(FILE*, char* pattern);
 int checkNormalTermination(char fileName[]);
 int checkFinished(int i);	
+int SaveCopy(const char * fn, const char * postfix);
+char * com2log(const char * fn);
 
-char header[250];
+char header[4096];
+char tail[4096];
 int types;
 int population;
 float box[3];
@@ -65,19 +70,26 @@ int main(int varc, char** var)
 	for (structure=0; structure < population; structure++)
 	{
 		makeFile(structure, fileName, 0);
-/*		strcat(command,fileName);
+		strcat(command,fileName);
 		printf(" %s ",command);
 		system(command);
+		// return 0;
 		if (checkNormalTermination(fileName))
 		{
+			SaveCopy(fileName, "EN1");
+			SaveCopy(com2log(fileName), "EN1");
 			makeFile(structure, fileName, 1);
 			system(command);
 		}
-		if (checkNormalTermination(fileName)==1)
+		if (checkNormalTermination(fileName)==1){
+			SaveCopy(fileName, "EN2");
+			SaveCopy(com2log(fileName), "EN2");
 			system(command);
-		command[4]='\0'; */
-	} 
+		}
+		command[4]='\0';
+	}
 	return 0;
+
 }
 
 int readInstructions(atom *atoms)
@@ -161,13 +173,26 @@ int makeFile(int number, char fileName[], int flag)
 	char chargmult[8];				//line with charge and mult
 	sprintf(fileName,"struct%d.com",number);
 	com=fopen(fileName,"w");
-	fprintf(com,"%%chk=struct%d\n",number);
-	fputs(header,com);
-	if (flag==1)
-	{
-		fseek(com, -1, SEEK_CUR);
+	fprintf(com,"%%chk=struct%d.chk\n",number);
+	
+	// ==== REMOVE Chars from the tail of header ====
+	char *p;
+	for(p=header;*p;p++);  // MOVE to LAST
+	while(p--){
+		// printf("%d/", *p);
+		if(*p > 32 ) break;
+	}
+	fwrite(header, sizeof(char), p-header+1, com);
+	if (flag==1){
 		fputs(" geom=check\n",com);
 	}
+	else{
+		fputs("\n",com);
+	}
+
+	// ========= FUCK C89 ============
+	
+
 	sprintf(chargmult,"\nkick structure # %d\n\n%d %d\n",number,charge,mult);
 	fputs(chargmult,com);
 	if (flag==0)
@@ -180,22 +205,42 @@ int makeFile(int number, char fileName[], int flag)
 		}
 	}
 	fputs("\n",com);
+	fprintf(com, "%s", tail);
 	fclose(com);
 	return 0;
 
 }
 
+bool startsWith(const char *pre, const char *str)
+{
+    size_t lenpre = strlen(pre),
+           lenstr = strlen(str);
+    return lenstr < lenpre ? false : strncmp(pre, str, lenpre) == 0;
+}
+
 void takeHeader(FILE *ins)
 {
-	int i=0;
-	char a=fgetc(ins);
-	while((a!=EOF))
+
+	char * line = NULL;
+    size_t len = 128;
+	
+	_Bool has_tail = false;
+	ssize_t read;
+
+	while((read = getline(&line, &len, ins)) != -1)
 	{
-		header[i]=a;
-		a=fgetc(ins);
-		i++;
+		if(startsWith(">TAIL", line)){has_tail=true; break;}
+		strcat(header, line);
 	}
-	header[i]=0;
+
+	if(has_tail){
+		while((read = getline(&line, &len, ins)) != -1){
+			strcat(tail, line);
+		}
+	}
+	if (line)
+        free(line);
+
 }
 
 
@@ -366,7 +411,7 @@ void shrink()
 int checkNormalTermination(char fileName[])
 {
 	char *dot;
-	char outFileName[40];
+	char outFileName[80];
 	strcpy(outFileName,fileName);
 	dot=strrchr(outFileName,'.');
 	*(dot+1)='\0';
@@ -437,3 +482,41 @@ int checkFinished(int i)
 	return 0;
 }
 
+int SaveCopy(const char * fn, const char * postfix){
+	char tmp[4096];
+	sprintf(tmp, "%s-%s", fn, postfix);
+	
+	FILE *input, *output;
+    char ch;
+
+    if((input = fopen(fn,"r")) == NULL)
+    {
+        printf("'%s' does not exist!\n", fn);
+        return -1;
+    }
+    if((output = fopen(tmp,"w")) == NULL)
+    {
+        fclose(input);
+        printf("Wrong output file name or Permission denied!\n");
+        return -2;
+    }
+    ch = fgetc(input);
+    while(!feof(input))
+    {
+        fputc(ch,output);
+        ch = fgetc(input);
+    }
+    fclose(input);
+    fclose(output);
+    return 0;
+
+}
+
+char * com2log(const char * fn){
+	char outFileName[80];
+	strcpy(outFileName,fn);
+	char* dot=strrchr(outFileName,'.');
+	*(dot+1)='\0';
+	strcat(outFileName,"log");
+	return outFileName;
+}
